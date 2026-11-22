@@ -1,5 +1,7 @@
 # Say It Back
 
+[![Made with pollinations.ai](https://raw.githubusercontent.com/pollinations/pollinations/main/packages/ui/src/brand/badge-made-with.svg)](https://pollinations.ai/?ref=badge)
+
 Practise speaking or singing a line and get word by word feedback.
 
 Pick a line or type your own, hear it read aloud, record yourself, and the app
