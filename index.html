@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Say It Back - speaking and singing practice with feedback</title>
+<meta name="description" content="Practise speaking or singing a line, hear it read aloud, record yourself, and get word by word feedback. Runs on Pollinations with your own balance.">
+<script defer src="https://cdn.jsdelivr.net/npm/@pollinations/ui@0.1.0-alpha.20/dist/connect.js"></script>
+<style>
+  :root { color-scheme: light dark; --ok:#1a9e54; --miss:#d33; --warn:#e08a00; --card:#8882; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; line-height: 1.45; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 1.5rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 18px 0 6px; }
+  .sub { opacity: .75; margin: 4px 0 0; }
+  .tabs { display: flex; gap: 8px; margin: 18px 0 10px; }
+  .tabs button { flex: 1; padding: 10px; font-size: 1rem; border-radius: 10px; border: 1px solid #8886; background: transparent; cursor: pointer; }
+  .tabs button.active { background: #6c4bd8; color: #fff; border-color: #6c4bd8; }
+  .card { border: 1px solid #8884; border-radius: 12px; padding: 14px; margin: 12px 0; background: var(--card); }
+  select, textarea, input { width: 100%; box-sizing: border-box; padding: 9px; border-radius: 8px; border: 1px solid #8886; font-size: 1rem; background: transparent; }
+  textarea { min-height: 56px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button.act { padding: 10px 14px; border-radius: 10px; border: 0; background: #6c4bd8; color: #fff; font-size: 1rem; cursor: pointer; }
+  button.act:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; color: inherit; border: 1px solid #8886; }
+  button.rec { background: #c22727; }
+  button.rec.on { animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  .words { font-size: 1.25rem; line-height: 2; }
+  .w { padding: 2px 5px; border-radius: 6px; margin-right: 3px; display: inline-block; }
+  .w.ok { background: #1a9e5433; }
+  .w.missed { background: #d33322; text-decoration: line-through; }
+  .w.wrong { background: #e08a0038; }
+  .extra { color: var(--warn); }
+  .score { font-size: 1.6rem; font-weight: 700; }
+  .note { white-space: pre-wrap; }
+  .status { min-height: 1.2em; opacity: .85; }
+  .err { color: var(--miss); }
+  audio { width: 100%; margin-top: 8px; }
+  footer { margin-top: 26px; font-size: .9rem; opacity: .8; }
+  a { color: #6c4bd8; }
+  .small { font-size: .9rem; opacity: .8; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Say It Back</h1>
+    <p class="sub">Practise a line out loud. Hear it, say it, get word by word feedback.</p>
+  </div>
+  <polli-connect budget="5" expiry="7"></polli-connect>
+</header>
+
+<p id="connState" class="status">Checking sign-in...</p>
+
+<div class="tabs">
+  <button id="tabSpeak" class="active" type="button">Speaking practice</button>
+  <button id="tabSing" type="button">Singing practice</button>
+</div>
+
+<div class="card">
+  <label for="preset"><strong>Pick a line</strong></label>
+  <select id="preset"></select>
+  <label for="custom" style="display:block;margin-top:10px;"><strong>Or type your own</strong></label>
+  <textarea id="custom" placeholder="Type any sentence or lyric line here..."></textarea>
+  <div class="row">
+    <button id="listenBtn" class="act" type="button">Listen to the line</button>
+    <label class="small" style="align-self:center;">Voice
+      <select id="voice" style="width:auto;display:inline-block;">
+        <option>alloy</option><option>echo</option><option>fable</option>
+        <option>onyx</option><option>nova</option><option>shimmer</option>
+      </select>
+    </label>
+  </div>
+  <audio id="refAudio" controls hidden></audio>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Your take</h2>
+  <div class="row" style="margin-top:0;">
+    <button id="recBtn" class="act rec" type="button">Record</button>
+    <button id="checkBtn" class="act" type="button" disabled>Check my take</button>
+    <button id="demoBtn" class="act ghost" type="button">See a demo result</button>
+  </div>
+  <audio id="myAudio" controls hidden></audio>
+  <p class="small">Recording stays in your browser until you press Check. Checking sends the clip to Pollinations for transcription, paid from your own balance.</p>
+  <p id="status" class="status"></p>
+</div>
+
+<div class="card" id="resultCard" hidden>
+  <div class="score" id="scoreLine"></div>
+  <h2>Word by word</h2>
+  <div class="words" id="wordDiff"></div>
+  <p id="extraLine" class="small"></p>
+  <h2>Details</h2>
+  <ul id="detailList"></ul>
+  <h2>Coach note</h2>
+  <p class="note" id="coachNote"></p>
+  <p class="small" id="heardLine"></p>
+</div>
+
+<footer>
+  Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a>.
+  Speech uses openai/tts-1, transcription uses openai/whisper-large-v3, the coach note uses openai/gpt-5.4-nano.
+  Everything runs in your browser against your own Pollinations balance. No server, no key storage.
+</footer>
+
+<script>
+const API = "https://gen.pollinations.ai";
+const TTS_MODEL = "openai/tts-1";
+const STT_MODEL = "openai/whisper-large-v3";
+const CHAT_MODEL = "openai/gpt-5.4-nano";
+
+const PRESETS = {
+  speak: [
+    "The quick brown fox jumps over the lazy dog near the river bank.",
+    "She sells seashells by the seashore.",
+    "How much wood would a woodchuck chuck if a woodchuck could chuck wood?",
+    "Please call Stella and ask her to bring these things with her from the store.",
+    "The weather today is perfect for a long walk in the park."
+  ],
+  sing: [
+    "Twinkle, twinkle, little star, how I wonder what you are.",
+    "Row, row, row your boat, gently down the stream.",
+    "Mary had a little lamb, its fleece was white as snow.",
+    "Happy birthday to you, happy birthday dear friend, happy birthday to you."
+  ]
+};
+
+let mode = "speak";
+let mediaRecorder = null, chunks = [], myBlob = null, stream = null;
+
+const $ = id => document.getElementById(id);
+const connectEl = document.querySelector("polli-connect");
+
+function apiKey() { return connectEl && connectEl.apiKey ? connectEl.apiKey : null; }
+
+function refreshConn() {
+  const k = apiKey();
+  $("connState").textContent = k
+    ? "Signed in. Your Pollinations balance pays for each call."
+    : "Not signed in. Connect with Pollinations to run the real flow, or open the demo result below.";
+  $("listenBtn").disabled = !k;
+  $("recBtn").disabled = !k;
+  $("checkBtn").disabled = !k || !myBlob;
+  return k;
+}
+connectEl.addEventListener("change", refreshConn);
+setTimeout(refreshConn, 800);
+
+function fillPresets() {
+  $("preset").innerHTML = PRESETS[mode].map(s => `<option>${s}</option>`).join("");
+}
+$("tabSpeak").onclick = () => setMode("speak");
+$("tabSing").onclick = () => setMode("sing");
+function setMode(m) {
+  mode = m;
+  $("tabSpeak").classList.toggle("active", m === "speak");
+  $("tabSing").classList.toggle("active", m === "sing");
+  fillPresets();
+}
+fillPresets();
+
+function targetText() {
+  const c = $("custom").value.trim();
+  return c || $("preset").value;
+}
+function setStatus(msg, isErr) {
+  const s = $("status");
+  s.textContent = msg || "";
+  s.className = "status" + (isErr ? " err" : "");
+}
+
+async function api(path, opts) {
+  const k = apiKey();
+  if (!k) throw new Error("Connect with Pollinations first.");
+  const res = await fetch(API + path, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${k}` } });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg += ": " + (j.error?.message || j.message || JSON.stringify(j)).slice(0, 300); } catch (e) {}
+    throw new Error(msg);
+  }
+  return res;
+}
+
+$("listenBtn").onclick = async () => {
+  try {
+    setStatus("Making the reference audio...");
+    const res = await api("/v1/audio/speech", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: TTS_MODEL, input: targetText(), voice: $("voice").value, response_format: "mp3" })
+    });
+    const blob = await res.blob();
+    const a = $("refAudio");
+    a.src = URL.createObjectURL(blob);
+    a.hidden = false;
+    await a.play().catch(() => {});
+    setStatus("Playing. Listen, then record yourself.");
+  } catch (e) { setStatus(e.message, true); }
+};
+
+$("recBtn").onclick = async () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") { mediaRecorder.stop(); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { setStatus("Microphone access was blocked. Allow the mic to record.", true); return; }
+  chunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    myBlob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    const a = $("myAudio");
+    a.src = URL.createObjectURL(myBlob);
+    a.hidden = false;
+    $("recBtn").textContent = "Record again";
+    $("recBtn").classList.remove("on");
+    refreshConn();
+    setStatus("Take recorded. Press Check my take for feedback.");
+  };
+  mediaRecorder.start();
+  $("recBtn").textContent = "Stop";
+  $("recBtn").classList.add("on");
+  setStatus(mode === "sing" ? "Sing the line, then press Stop." : "Say the line out loud, then press Stop.");
+};
+
+$("checkBtn").onclick = async () => {
+  if (!myBlob) return;
+  try {
+    setStatus("Transcribing your take...");
+    const ext = myBlob.type.includes("mp4") ? "mp4" : myBlob.type.includes("ogg") ? "ogg" : "webm";
+    const fd = new FormData();
+    fd.append("file", myBlob, "take." + ext);
+    fd.append("model", STT_MODEL);
+    fd.append("language", "en");
+    fd.append("response_format", "verbose_json");
+    fd.append("timestamp_granularities[]", "word");
+    const res = await api("/v1/audio/transcriptions", { method: "POST", body: fd });
+    const tr = await res.json();
+    setStatus("Scoring...");
+    const result = scoreTake(targetText(), tr);
+    const note = await coachNote(result);
+    render(result, tr.text || "", note, false);
+    setStatus("Done.");
+  } catch (e) { setStatus(e.message, true); }
+};
+
+function tokens(text) {
+  return (text.toLowerCase().match(/[a-z0-9']+/g) || []);
+}
+
+function scoreTake(target, tr) {
+  const tWords = tokens(target);
+  const heard = tr.words && tr.words.length
+    ? tr.words.map(w => ({ w: (w.word || "").toLowerCase().replace(/[^a-z0-9']/g, ""), start: w.start, end: w.end })).filter(x => x.w)
+    : tokens(tr.text || "").map(w => ({ w, start: null, end: null }));
+  const hWords = heard.map(x => x.w);
+  // LCS alignment
+  const n = tWords.length, m = hWords.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = tWords[i] === hWords[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const status = new Array(n).fill("missed");
+  const matchedHeard = new Array(m).fill(false);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (tWords[i] === hWords[j]) { status[i] = "ok"; matchedHeard[j] = true; i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
+  }
+  const missed = tWords.filter((w, ix) => status[ix] !== "ok");
+  const extra = hWords.filter((w, ix) => !matchedHeard[ix]);
+  // Pair adjacent missed/extra as likely wrong words
+  const wrongPairs = [];
+  const pairs = Math.min(missed.length, extra.length);
+  for (let k = 0; k < pairs; k++) wrongPairs.push([missed[k], extra[k]]);
+  // Timing: long pauses between matched words, plus overall pace
+  const timing = [];
+  const timed = heard.filter((x, ix) => matchedHeard[ix] && x.start != null);
+  for (let k = 1; k < timed.length; k++) {
+    const gap = timed[k].start - timed[k - 1].end;
+    if (gap > 0.9) timing.push(`long pause of ${gap.toFixed(1)}s before "${timed[k].w}"`);
+  }
+  if (timed.length > 1) {
+    const dur = timed[timed.length - 1].end - timed[0].start;
+    if (dur > 0) timing.push(`pace: about ${Math.round(timed.length / dur * 60)} words per minute over ${dur.toFixed(1)}s`);
+  }
+  const score = n ? Math.round(100 * status.filter(s => s === "ok").length / n) : 0;
+  return { target, tWords, status, missed, extra, wrongPairs, timing, score, heardText: tr.text || "" };
+}
+
+async function coachNote(r) {
+  const sys = mode === "sing"
+    ? "You are a kind singing coach. In three short sentences max: say what landed, name the words that were missed or wrong, and comment on timing drift (pauses) if any. End with one tip. Plain words, encouraging."
+    : "You are a kind speaking coach. In three short sentences max: say what was right, name the words that were missed or wrong, and end with one tip. Plain words, encouraging.";
+  const user = `Target line: "${r.target}"\nLearner said: "${r.heardText}"\nMissed words: ${r.missed.join(", ") || "none"}\nExtra or wrong words: ${r.extra.join(", ") || "none"}\nTiming notes: ${r.timing.join("; ") || "none"}\nScore: ${r.score} percent of words matched.`;
+  const res = await api("/v1/chat/completions", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: CHAT_MODEL, messages: [{ role: "system", content: sys }, { role: "user", content: user }] })
+  });
+  const j = await res.json();
+  return j.choices[0].message.content;
+}
+
+function render(r, heardText, note, isDemo) {
+  $("resultCard").hidden = false;
+  $("scoreLine").textContent = `Score: ${r.score}% of words matched` + (isDemo ? " (demo)" : "");
+  $("wordDiff").innerHTML = r.tWords.map((w, ix) =>
+    `<span class="w ${r.status[ix]}">${w}</span>`).join("");
+  $("extraLine").innerHTML = r.extra.length
+    ? `Extra or different words heard: <span class="extra">${r.extra.join(", ")}</span>` : "No extra words heard.";
+  const items = [];
+  if (r.missed.length) items.push(`Missed: ${r.missed.join(", ")}`);
+  if (r.wrongPairs.length) items.push(`Likely swapped: ${r.wrongPairs.map(p => `"${p[0]}" came out as "${p[1]}"`).join("; ")}`);
+  r.timing.forEach(t => items.push(t[0].toUpperCase() + t.slice(1)));
+  if (!items.length) items.push("Clean take. Every word landed with no long pauses.");
+  $("detailList").innerHTML = items.map(t => `<li>${t}</li>`).join("");
+  $("coachNote").textContent = note;
+  $("heardLine").textContent = `Heard: "${heardText.trim()}"`;
+  $("resultCard").scrollIntoView({ behavior: "smooth" });
+}
+
+$("demoBtn").onclick = () => {
+  const target = "She sells seashells by the seashore.";
+  const demoWords = [
+    { word: "She", start: 0.0, end: 0.2 }, { word: "sell", start: 0.25, end: 0.5 },
+    { word: "seashells", start: 1.9, end: 2.4 }, { word: "by", start: 2.45, end: 2.6 },
+    { word: "the", start: 2.6, end: 2.75 }, { word: "seashore", start: 2.8, end: 3.3 }
+  ];
+  const tr = { text: "She sell seashells by the seashore.", words: demoWords };
+  const r = scoreTake(target, tr);
+  render(r, tr.text, "Good rhythm and a clear finish. You dropped the s on \"sells\" and paused before \"seashells\", which broke the flow a little. Tip: say \"she sells\" as one linked chunk three times slowly, then speed up.", true);
+};
+</script>
+</body>
+</html>
